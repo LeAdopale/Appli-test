@@ -184,27 +184,42 @@ if uploaded_file:
                 if not selected_vehicles:
                     st.error("Veuillez sélectionner au moins un véhicule.")
                 else:
+                    # 1. On sauvegarde d'abord la flotte dans la session
                     st.session_state['selected_fleet'] = selected_vehicles
-                    st.session_state['step'] = 3
-                    st.rerun()
-
-                with st.status("Initialisation du moteur de calcul...") as status:
-                    # A. Chargement du graphe
-                    status.update(label="Chargement de la carte routière (OSM)...")
-                    G = get_cached_graph("Nantes, France")
                     
-                    # B. Calcul des matrices (Uniquement entre les sites présents dans l'Excel)
-                    status.update(label="Calcul de la matrice de distances réelles...")
-                    df_sites = st.session_state['all_data']['Sites'] # On suppose l'onglet 'Sites'
-                    mat_dist, mat_temps = calculer_matrice_hors_ligne(G, df_sites)
-                    
-                    # C. Atomisation des flux en 'Jobs'
-                    status.update(label="Génération du catalogue de tâches (Jobs)...")
-                    capa_max = 18 # Ou récupéré dynamiquement de la flotte
-                    df_jobs = generer_jobs_atomises(
-                        st.session_state['df_flux_final'], 
-                        df_sites, 
-                        mat_dist, 
-                        mat_temps, 
-                        capa_max
-                    )
+                    # 2. On exécute les calculs AVANT le rerun
+                    with st.status("Initialisation du moteur de calcul...") as status:
+                        # A. Chargement du graphe
+                        status.update(label="Chargement de la carte routière (OSM)...")
+                        G = get_cached_graph("Nantes, France")
+                        
+                        # B. Calcul des matrices
+                        status.update(label="Calcul de la matrice de distances réelles...")
+                        # Vérification que l'onglet 'Sites' existe
+                        if 'Sites' in all_data:
+                            df_sites = all_data['Sites'] 
+                            mat_dist, mat_temps = calculer_matrice_hors_ligne(G, df_sites)
+                            
+                            # C. Atomisation des flux en 'Jobs'
+                            status.update(label="Génération du catalogue de tâches (Jobs)...")
+                            capa_max = 18 # Vous pourrez le rendre dynamique plus tard
+                            
+                            # IMPORTANT: Utiliser df_propre défini plus haut
+                            df_jobs = generer_jobs_atomises(
+                                df_propre, 
+                                df_sites, 
+                                mat_dist, 
+                                mat_temps, 
+                                capa_max
+                            )
+                            
+                            # Sauvegarde des résultats du calcul pour la Phase 1
+                            st.session_state['matrice_temps'] = mat_temps
+                            st.session_state['df_jobs'] = df_jobs
+                            
+                            # 3. Une fois TOUT terminé, on change d'étape et on rerun
+                            st.session_state['step'] = 3
+                            status.update(label="Phase 0 terminée !", state="complete")
+                            st.rerun()
+                        else:
+                            st.error("L'onglet 'Sites' est introuvable dans le fichier Excel.")
