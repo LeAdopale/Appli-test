@@ -1,60 +1,54 @@
+import math
 import time
+from typing import Dict, Optional, Tuple
+
 import requests
 import streamlit as st
 
-# -----------------------------
-# Configuration de la page
-# -----------------------------
+# --------------------------------------------------
+# Configuration générale
+# --------------------------------------------------
 st.set_page_config(
-    page_title="Calculateur de trajet",
+    page_title="Calcul de trajet",
     page_icon="🚗",
-    layout="centered"
+    layout="centered",
 )
 
 st.title("🚗 Calculateur de trajet")
-st.write("Saisissez deux adresses pour calculer automatiquement la distance et la durée du trajet le plus court.")
+st.write(
+    "Entrez deux adresses pour calculer automatiquement la distance "
+    "et la durée estimée du trajet routier le plus court disponible."
+)
 
-# -----------------------------
-# Paramètres / constantes
-# -----------------------------
+# Services publics utilisés
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
+OSRM_ROUTE_URL = "https://router.project-osrm.org/route/v1/driving"
 
-# IMPORTANT :
-# ajoutez votre clé API OpenRouteService dans .streamlit/secrets.toml :
-# ORS_API_KEY = "votre_cle_api"
-
-ORS_API_KEY = st.secrets.get("ORS_API_KEY", None)
-
-if not ORS_API_KEY:
-    st.error(
-        "Clé API manquante. Ajoutez `ORS_API_KEY` dans votre fichier `.streamlit/secrets.toml`."
-    )
-    st.stop()
+# User-Agent explicite recommandé pour Nominatim
+HEADERS = {
+    "User-Agent": "premiere-app-streamlit-trajet/1.0"
+}
 
 
-# -----------------------------
+# --------------------------------------------------
 # Fonctions utilitaires
-# -----------------------------
-def geocode_address(address: str):
+# --------------------------------------------------
+def geocode_address(address: str) -> Optional[Dict]:
     """
-    Convertit une adresse texte en coordonnées (lat, lon) via Nominatim.
+    Convertit une adresse texte en coordonnées via Nominatim.
+    Retourne un dict avec display_name, lat, lon ou None si rien trouvé.
     """
-    headers = {
-        # Nominatim demande un User-Agent explicite
-        "User-Agent": "streamlit-calcul-trajet/1.0 (contact: example@example.com)"
-    }
     params = {
         "q": address,
         "format": "jsonv2",
-        "limit": 1
+        "limit": 1,
     }
 
     response = requests.get(
         NOMINATIM_URL,
         params=params,
-        headers=headers,
-        timeout=20
+        headers=HEADERS,
+        timeout=20,
     )
     response.raise_for_status()
 
@@ -70,31 +64,30 @@ def geocode_address(address: str):
     }
 
 
-def get_shortest_route(start_lon, start_lat, end_lon, end_lat):
+def get_route_osrm(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+) -> Optional[Dict]:
     """
-    Calcule l'itinéraire via OpenRouteService
-    avec préférence = shortest.
+    Calcule un itinéraire routier via le serveur public OSRM.
+    start/end = (lon, lat)
+    Retourne distance_m, duration_s, geometry ou None.
     """
-    headers = {
-        "Authorization": ORS_API_KEY,
-        "Content-Type": "application/json"
-    }
+    start_lon, start_lat = start
+    end_lon, end_lat = end
 
-    payload = {
-        "coordinates": [
-            [start_lon, start_lat],
-            [end_lon, end_lat]
-        ],
-        "preference": "shortest",
-        "instructions": False
-    }
-
-    response = requests.post(
-        ORS_DIRECTIONS_URL,
-        json=payload,
-        headers=headers,
-        timeout=30
+    url = (
+        f"{OSRM_ROUTE_URL}/"
+        f"{start_lon},{start_lat};{end_lon},{end_lat}"
     )
+
+    params = {
+        "overview": "false",
+        "alternatives": "false",
+        "steps": "false",
+    }
+
+    response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
 
     data = response.json()
@@ -103,13 +96,10 @@ def get_shortest_route(start_lon, start_lat, end_lon, end_lat):
     if not routes:
         return None
 
-    summary = routes[0].get("summary", {})
-    distance_m = summary.get("distance")
-    duration_s = summary.get("duration")
-
+    route = routes[0]
     return {
-        "distance_m": distance_m,
-        "duration_s": duration_s
+        "distance_m": route.get("distance"),
+        "duration_s": route.get("duration"),
     }
 
 
@@ -117,8 +107,8 @@ def format_distance(distance_m: float) -> str:
     if distance_m is None:
         return "-"
     if distance_m < 1000:
-        return f"{distance_m:.0f} m"
-    return f"{distance_m / 1000:.2f} km"
+        return f"{round(distance_m)} m"
+    return f"{distance_m / 1000:.1f} km"
 
 
 def format_duration(duration_s: float) -> str:
@@ -133,24 +123,49 @@ def format_duration(duration_s: float) -> str:
     return f"{hours} h {minutes:02d} min"
 
 
-# -----------------------------
-# Interface utilisateur
-# -----------------------------
+def haversine_km(
+    lat1: float,
+    lon1: float,
+    lat2: float,
+    lon2: float,
+) -> float:
+    """
+    Distance à vol d'oiseau en km.
+    Sert de secours si le routage échoue.
+    """
+    r = 6371.0
+
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+# --------------------------------------------------
+# Formulaire
+# --------------------------------------------------
 with st.form("trajet_form"):
     adresse_depart = st.text_input(
         "Adresse de départ",
-        placeholder="Ex. : 10 rue de Rivoli, Paris"
+        placeholder="Ex. : 10 rue de Rivoli, Paris",
     )
     adresse_arrivee = st.text_input(
         "Adresse d'arrivée",
-        placeholder="Ex. : 5 place Bellecour, Lyon"
+        placeholder="Ex. : 5 place Bellecour, Lyon",
     )
 
     submitted = st.form_submit_button("Calculer le trajet")
 
-# -----------------------------
+# --------------------------------------------------
 # Traitement
-# -----------------------------
+# --------------------------------------------------
 if submitted:
     if not adresse_depart.strip() or not adresse_arrivee.strip():
         st.warning("Merci de renseigner les deux adresses.")
@@ -163,8 +178,7 @@ if submitted:
     try:
         with st.spinner("Recherche des adresses..."):
             depart = geocode_address(adresse_depart.strip())
-            # petite pause par précaution vis-à-vis de Nominatim
-            time.sleep(1)
+            time.sleep(1)  # évite d'enchaîner trop vite les appels publics
             arrivee = geocode_address(adresse_arrivee.strip())
 
         if not depart:
@@ -175,27 +189,34 @@ if submitted:
             st.error("Impossible de localiser l'adresse d'arrivée.")
             st.stop()
 
-        st.success("Adresses trouvées.")
+        with st.expander("Adresses interprétées"):
+            st.write(f"**Départ** : {depart['display_name']}")
+            st.write(f"**Arrivée** : {arrivee['display_name']}")
 
-        with st.expander("Voir les adresses interprétées", expanded=False):
-            st.write(f"**Départ :** {depart['display_name']}")
-            st.write(f"**Arrivée :** {arrivee['display_name']}")
-
-        with st.spinner("Calcul du trajet le plus court..."):
-            route = get_shortest_route(
-                depart["lon"], depart["lat"],
-                arrivee["lon"], arrivee["lat"]
+        with st.spinner("Calcul du trajet..."):
+            route = get_route_osrm(
+                (depart["lon"], depart["lat"]),
+                (arrivee["lon"], arrivee["lat"]),
             )
 
-        if not route:
-            st.error("Aucun trajet routier n'a pu être calculé entre ces deux adresses.")
-            st.stop()
+        if route:
+            col1, col2 = st.columns(2)
+            col1.metric("Distance routière", format_distance(route["distance_m"]))
+            col2.metric("Durée estimée", format_duration(route["duration_s"]))
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Distance", format_distance(route["distance_m"]))
-        with col2:
-            st.metric("Durée estimée", format_duration(route["duration_s"]))
+            st.success("Trajet calculé avec succès.")
+        else:
+            st.warning(
+                "Le calcul routier n'a pas abouti. "
+                "Je te donne au moins la distance à vol d'oiseau."
+            )
+            distance_km = haversine_km(
+                depart["lat"],
+                depart["lon"],
+                arrivee["lat"],
+                arrivee["lon"],
+            )
+            st.metric("Distance à vol d'oiseau", f"{distance_km:.1f} km")
 
     except requests.HTTPError as e:
         st.error(f"Erreur HTTP lors de l'appel à un service externe : {e}")
