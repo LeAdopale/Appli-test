@@ -4,6 +4,44 @@ import pandas as pd
 import numpy as np
 import os
 import streamlit as st
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import time
+
+def geocoder_sites(df_param_sites):
+    """
+    Transforme les adresses textuelles en coordonnées GPS.
+    df_param_sites doit avoir : Col A (Nom) et Col B (Adresse)
+    """
+    geolocator = Nominatim(user_agent="chu_nantes_logistique")
+    # RateLimiter permet de ne pas surcharger le serveur (1 requête/sec max)
+    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+    
+    # Nettoyage des noms de colonnes
+    df_param_sites.columns = [str(c).strip() for c in df_param_sites.columns]
+    col_nom = df_param_sites.columns[0]
+    col_adresse = df_param_sites.columns[1]
+    
+    st.info("Géocodage des adresses en cours (1 sec par adresse)...")
+    
+    lats, lons = [], []
+    for addr in df_param_sites[col_adresse]:
+        # On ajoute ", Nantes, France" si ce n'est pas précisé pour aider le moteur
+        full_addr = addr if "nantes" in addr.lower() else f"{addr}, Nantes, France"
+        location = geocode(full_addr)
+        
+        if location:
+            lats.append(location.latitude)
+            lons.append(location.longitude)
+        else:
+            st.warning(f"📍 Adresse non trouvée : {full_addr}")
+            lats.append(None)
+            lons.append(None)
+            
+    df_param_sites['Latitude'] = lats
+    df_param_sites['Longitude'] = lons
+    return df_param_sites.dropna(subset=['Latitude', 'Longitude'])
+
 
 def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
     cache_path = "./data/graph_nantes.graphml"
@@ -40,7 +78,15 @@ def calculer_matrice_hors_ligne(G, df_sites):
     Calcule la matrice de distances et temps entre tous les sites 
     en utilisant l'algorithme de Dijkstra sur le graphe local.
     """
+
+    # Étape de géocodage
+    df_gps = geocoder_sites(df_param_sites)
+    
     nodes = []
+    for _, row in df_gps.iterrows():
+        node = ox.nearest_nodes(G, X=row['Longitude'], Y=row['Latitude'])
+        nodes.append(node)
+        
     # 1. On projette chaque site (lat, lon) sur le noeud du graphe le plus proche
     for _, row in df_sites.iterrows():
         node = ox.nearest_nodes(G, X=row['Longitude'], Y=row['Latitude'])
