@@ -117,7 +117,10 @@ def calculer_matrice_hors_ligne(G, df_param_sites):
 def generer_jobs_atomises(df_flux, mapping_site_index, matrice_dist, matrice_temps, capa_max):
     col_dep = next((c for c in df_flux.columns if "départ" in str(c).lower()), df_flux.columns[0])
     col_arr = next((c for c in df_flux.columns if "destination" in str(c).lower()), df_flux.columns[1])
-    col_vol = next((c for c in df_flux.columns if "volume" in str(c).lower()), "Volume")
+    col_vol = next((c for c in df_flux.columns if "vol" in str(c).lower()), None)
+    if col_vol is None:
+        st.error(f"Impossible de trouver une colonne 'Volume' dans l'onglet flux. Colonnes dispos : {list(df_flux.columns)}")
+        return pd.DataFrame()
 
     jobs = []
     for idx, flux in df_flux.iterrows():
