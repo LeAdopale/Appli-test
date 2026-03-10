@@ -73,56 +73,48 @@ def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
         
     return G
 
-def calculer_matrice_hors_ligne(G, df_sites):
-    """
-    Calcule la matrice de distances et temps entre tous les sites 
-    en utilisant l'algorithme de Dijkstra sur le graphe local.
-    """
-
-    # Étape de géocodage
-    df_gps = geocoder_sites(df_sites)
+def calculer_matrice_hors_ligne(G, df_param_sites):
+    # 1. Géocodage
+    df_gps = geocoder_sites(df_param_sites)
     
+    # 2. Sécurité : On ne garde QUE les lignes où Lat/Lon ne sont pas nulles
+    df_gps = df_gps.dropna(subset=['Latitude', 'Longitude'])
+    
+    if df_gps.empty:
+        st.error("❌ Aucun site n'a pu être localisé sur la carte. Vérifiez le format des adresses.")
+        return None, None
+
     nodes = []
-    for _, row in df_gps.iterrows():
+    for idx, row in df_gps.iterrows():
         try:
-            # On force la conversion en float pour être certain
+            # Conversion explicite et vérification
             lon = float(row['Longitude'])
             lat = float(row['Latitude'])
             
-            # Appel à OSMnx (qui nécessite scipy en arrière-plan)
+            # Projection sur le graphe
             node = ox.nearest_nodes(G, X=lon, Y=lat)
             nodes.append(node)
         except Exception as e:
-            st.error(f"Erreur sur le site {row[0]} : {e}")
+            st.warning(f"⚠️ Impossible de projeter le site {idx} sur la route : {e}")
             continue
-        
-    # 1. On projette chaque site (lat, lon) sur le noeud du graphe le plus proche
-    for _, row in df_sites.iterrows():
-        node = ox.nearest_nodes(G, X=row['Longitude'], Y=row['Latitude'])
-        nodes.append(node)
-    
-    num_sites = len(nodes)
-    matrice_dist = np.zeros((num_sites, num_sites))
-    matrice_temps = np.zeros((num_sites, num_sites))
-    
-    # 2. Calcul des plus courts chemins (All-pairs shortest path simplifié)
-    for i in range(num_sites):
-        for j in range(num_sites):
-            if i == j: continue
             
-            # Calcul du chemin le plus court en temps
+    # 3. Calcul de la matrice entre les noeuds valides
+    num_nodes = len(nodes)
+    mat_dist = np.zeros((num_nodes, num_nodes))
+    mat_temps = np.zeros((num_nodes, num_nodes))
+    
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            if i == j: continue
             try:
-                # nx.shortest_path_length utilise l'attribut 'travel_time' ajouté par OSMnx
-                temps_sec = nx.shortest_path_length(G, nodes[i], nodes[j], weight='travel_time')
-                dist_metres = nx.shortest_path_length(G, nodes[i], nodes[j], weight='length')
-                
-                matrice_temps[i, j] = temps_sec / 60  # Conversion minutes
-                matrice_dist[i, j] = dist_metres / 1000 # Conversion km
+                # Calcul Dijkstra
+                mat_temps[i, j] = nx.shortest_path_length(G, nodes[i], nodes[j], weight='travel_time') / 60
+                mat_dist[i, j] = nx.shortest_path_length(G, nodes[i], nodes[j], weight='length') / 1000
             except nx.NetworkXNoPath:
-                matrice_temps[i, j] = 9999 # Chemin impossible
-                matrice_dist[i, j] = 9999
-                
-    return matrice_dist, matrice_temps
+                mat_temps[i, j] = 999
+                mat_dist[i, j] = 999
+
+    return mat_dist, mat_temps
 
 def generer_jobs_atomises(df_flux, df_sites, matrice_dist, matrice_temps, capa_vehicule_max):
     """
