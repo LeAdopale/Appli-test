@@ -196,8 +196,8 @@ if uploaded_file:
                         # B. Calcul des matrices
                         status.update(label="Calcul de la matrice de distances réelles...")
                         # Vérification que l'onglet 'Sites' existe
-                        if 'Sites' in all_data:
-                            df_sites = all_data['Sites'] 
+                        if 'param Sites' in all_data:
+                            df_sites = all_data['param Sites'] 
                             mat_dist, mat_temps = calculer_matrice_hors_ligne(G, df_sites)
                             
                             # C. Atomisation des flux en 'Jobs'
