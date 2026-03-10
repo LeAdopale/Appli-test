@@ -118,32 +118,53 @@ def calculer_matrice_hors_ligne(G, df_param_sites):
 
 def generer_jobs_atomises(df_flux, df_sites, matrice_dist, matrice_temps, capa_vehicule_max):
     """
-    Transforme les flux en 'Jobs' individuels basés sur les capacités réelles.
+    Transforme les flux en 'Jobs' individuels.
+    Utilise l'ordre des colonnes pour éviter les KeyError sur les noms.
     """
-    # Création d'un index pour retrouver les sites dans la matrice
-    site_to_idx = {name: i for i, name in enumerate(df_sites['Nom_Site'])}
+    # 1. On nettoie les espaces dans les noms de colonnes de df_sites
+    df_sites.columns = [str(c).strip() for c in df_sites.columns]
     
+    # On suppose que la colonne 0 est le NOM du site (ex: 'Hôtel Dieu')
+    nom_col_site = df_sites.columns[0]
+    
+    # Création du dictionnaire de correspondance : { 'Hôtel Dieu': 0, 'Laënnec': 1, ... }
+    site_to_idx = {name: i for i, name in enumerate(df_sites[nom_col_site])}
+    
+    # Identification des colonnes dans df_flux (Aller/Retour, Départ, Arrivée, Volume)
+    # On cherche les colonnes par mots-clés pour être robuste
+    col_dep = next((c for c in df_flux.columns if "départ" in str(c).lower()), df_flux.columns[0])
+    col_arr = next((c for c in df_flux.columns if "destination" in str(c).lower()), df_flux.columns[1])
+    col_vol = next((c for c in df_flux.columns if "volume" in str(c).lower()), "Volume")
+
     jobs = []
     for idx, flux in df_flux.iterrows():
-        # Atomisation si le volume dépasse la capacité d'un camion
-        nb_splits = int(np.ceil(flux['Volume'] / capa_vehicule_max))
+        # Calcul du nombre de "morceaux" de flux (split)
+        volume_total = float(flux[col_vol])
+        if volume_total <= 0: continue
+            
+        nb_splits = int(np.ceil(volume_total / capa_vehicule_max))
         
-        i = site_to_idx[flux['Point de départ']]
-        j = site_to_idx[flux['Point de destination']]
+        # Récupération des indices dans la matrice
+        try:
+            i = site_to_idx[str(flux[col_dep]).strip()]
+            j = site_to_idx[str(flux[col_arr]).strip()]
+        except KeyError as e:
+            st.warning(f"⚠️ Le site '{e}' présent dans les flux est inconnu dans l'onglet 'param Sites'.")
+            continue
         
         for s in range(nb_splits):
-            vol = capa_vehicule_max if s < nb_splits - 1 else (flux['Volume'] % capa_vehicule_max or capa_vehicule_max)
+            vol_unitaire = capa_vehicule_max if s < nb_splits - 1 else (volume_total % capa_vehicule_max or capa_vehicule_max)
             
             jobs.append({
                 'id_job': f"J_{idx}_{s}",
-                'origine': flux['Point de départ'],
-                'destination': flux['Point de destination'],
-                'volume': vol,
-                'poids': vol * 25, # Poids moyen arbitraire par roll (ex: 25kg)
+                'origine': flux[col_dep],
+                'destination': flux[col_arr],
+                'volume': vol_unitaire,
                 'dist_km': matrice_dist[i, j],
                 'temps_min': matrice_temps[i, j],
-                'fenetre_debut': flux['Heure de mise à disposition min départ'],
-                'fenetre_fin': flux['Heure de livraison à destination']
+                # On garde les fenêtres horaires si elles existent, sinon valeurs par défaut
+                'h_dep': flux.get('Heure de mise à disposition min départ', "08:00"),
+                'h_arr': flux.get('Heure de livraison à destination', "18:00")
             })
             
     return pd.DataFrame(jobs)
