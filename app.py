@@ -230,7 +230,7 @@ if uploaded_file:
                         else:
                             st.error("L'onglet 'param Sites' est introuvable dans le fichier Excel.")
 
-            # --- ÉTAPE 3 : RÉSULTATS DE L'ATOMISATION ET LANCEMENT OPTIMISATION ---
+        # --- ÉTAPE 3 : RÉSULTATS DE L'ATOMISATION ET LANCEMENT OPTIMISATION ---
             if st.session_state.get('step') == 3:
                 st.divider()
                 st.header("📦 Étape 3 : Catalogue des Tâches (Jobs)")
