@@ -1,111 +1,91 @@
 import streamlit as st
-import folium
-from streamlit_folium import st_folium
-import requests
-import polyline
+import pandas as pd
+import plotly.express as px
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="GPS Streamlit", layout="wide")
+# Configuration
+st.set_page_config(page_title="Logistique CHU - Optimisation", layout="wide")
 
-# --- FONCTIONS LOGIQUES ---
-
-def geocode(adresse):
-    """Convertit une adresse en coordonnées (lat, lon) via Nominatim"""
+## --- FONCTIONS UTILES ---
+def load_data(file):
+    expected = ["param Véhicules", "param Sites", "param Contenants", "param RH", "M flux"]
     try:
-        url = f"https://nominatim.openstreetmap.org/search?format=json&q={adresse}"
-        headers = {'User-Agent': 'my-streamlit-app-v1'}
-        response = requests.get(url, headers=headers).json()
-        if response:
-            return float(response[0]['lat']), float(response[0]['lon'])
+        dict_dfs = pd.read_excel(file, sheet_name=expected)
+        return dict_dfs, None
     except Exception as e:
-        st.error(f"Erreur de géocodage : {e}")
-    return None
+        return None, str(e)
 
-def get_route(start_coords, end_coords):
-    """Récupère l'itinéraire via l'API OSRM"""
-    # OSRM utilise le format (longitude, latitude)
-    loc = f"{start_coords[1]},{start_coords[0]};{end_coords[1]},{end_coords[0]}"
-    url = f"http://router.project-osrm.org/route/v1/driving/{loc}?overview=full"
-    try:
-        response = requests.get(url).json()
-        if response.get('code') == 'Ok':
-            line = response['routes'][0]['geometry']
-            points = polyline.decode(line)
-            duration = response['routes'][0]['duration'] / 60  # minutes
-            distance = response['routes'][0]['distance'] / 1000 # km
-            return points, distance, duration
-    except Exception as e:
-        st.error(f"Erreur de calcul d'itinéraire : {e}")
-    return None, None, None
+## --- ETAPE 1 : ACCUEIL ---
+st.title("🚚 Optimisation des Tournées de Distribution")
 
-# --- GESTION DE LA MÉMOIRE (SESSION STATE) ---
-# On initialise les variables pour qu'elles persistent au rechargement de la page
-if 'route_points' not in st.session_state:
-    st.session_state.route_points = None
-if 'distance' not in st.session_state:
-    st.session_state.distance = None
-if 'duration' not in st.session_state:
-    st.session_state.duration = None
-if 'coords' not in st.session_state:
-    st.session_state.coords = None
+uploaded_file = st.sidebar.file_uploader("Charger le fichier de paramétrage", type=["xlsx"])
 
-# --- INTERFACE UTILISATEUR ---
-
-st.title("🚗 Mon Calculateur d'Itinéraire")
-st.markdown("Cette application calcule le trajet le plus rapide entre deux points.")
-
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.subheader("Paramètres")
-    addr_dep = st.text_input("Départ", "Tour Eiffel, Paris")
-    addr_arr = st.text_input("Arrivée", "Musée du Louvre, Paris")
+if uploaded_file:
+    data, error = load_data(uploaded_file)
     
-    if st.button("Lancer le calcul", type="primary"):
-        with st.spinner("Recherche d'itinéraire..."):
-            c1 = geocode(addr_dep)
-            c2 = geocode(addr_arr)
-            
-            if c1 and c2:
-                points, dist, dur = get_route(c1, c2)
-                if points:
-                    # SAUVEGARDE dans le session_state
-                    st.session_state.route_points = points
-                    st.session_state.distance = dist
-                    st.session_state.duration = dur
-                    st.session_state.coords = (c1, c2)
-                else:
-                    st.error("Aucun itinéraire trouvé.")
-            else:
-                st.error("Une des adresses est introuvable.")
-
-with col2:
-    # On affiche la carte seulement si des données sont présentes en mémoire
-    if st.session_state.route_points:
-        st.success(f"📍 {st.session_state.distance:.2f} km | ⏱️ {st.session_state.duration:.0f} min")
-        
-        c1, c2 = st.session_state.coords
-        
-        # Création de la carte
-        m = folium.Map(location=c1, zoom_start=13)
-        
-        # Ajout du tracé
-        folium.PolyLine(
-            st.session_state.route_points, 
-            color="#31333F", 
-            weight=5, 
-            opacity=0.8
-        ).add_to(m)
-        
-        # Ajout des marqueurs
-        folium.Marker(c1, popup="Départ", icon=folium.Icon(color='green')).add_to(m)
-        folium.Marker(c2, popup="Arrivée", icon=folium.Icon(color='red')).add_to(m)
-        
-        # Ajuster la vue pour voir tout le trajet
-        m.fit_bounds([c1, c2])
-        
-        # Affichage du composant Folium
-        # L'ajout d'une 'key' unique est crucial pour éviter les bugs d'affichage
-        st_folium(m, width="100%", height=500, key="map_display")
+    if error:
+        st.error(f"Fichier non conforme : {error}")
     else:
-        st.info("Entrez vos adresses à gauche pour générer la carte.")
+        st.success("Données chargées !")
+        
+        # Attribution des DataFrames
+        df_v = data["param Véhicules"]
+        df_f = data["M flux"]
+
+        ## --- ETAPE 2 : CONTROLE DE COHERENCE ---
+        st.header("📊 1. Contrôle des flux hebdomadaires")
+        
+        # On regroupe par Fonction Support et Jour pour l'histogramme
+        # On suppose les colonnes 'Fonction support', 'Jour de passage' et 'Nombre de contenants'
+        if 'Fonction support' in df_f.columns:
+            fig = px.histogram(df_f, x="Jour de passage", y="Nombre de contenants", 
+                               color="Fonction support", barmode="group",
+                               title="Volume de contenants à distribuer par jour")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        if st.button("Valider les données d'entrée"):
+            st.session_state['validated'] = True
+
+        ## --- ETAPE 3 : CONFIGURATION DE LA FLOTTE ---
+        if st.session_state.get('validated'):
+            st.divider()
+            st.header("⚙️ 2. Configuration de la simulation")
+            st.subheader("Sélectionnez les véhicules disponibles et leur taux de remplissage")
+
+            selected_vehicles = []
+            
+            # Création du tableau de sélection
+            cols = st.columns([1, 2, 2, 2])
+            cols[0].write("**Actif**")
+            cols[1].write("**Type de véhicule**")
+            cols[2].write("**Taux d'occupation max (%)**")
+            cols[3].write("**Capacité (Rolls)**")
+
+            for i, row in df_v.iterrows():
+                c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
+                is_active = c1.checkbox("", value=True, key=f"check_{i}")
+                type_v = row['Type de véhicule']
+                c2.text(type_v)
+                
+                # Input pour le taux d'occupation (par défaut 100%)
+                taux = c3.number_input("", min_value=10, max_value=100, value=100, step=5, key=f"taux_{i}")
+                
+                # Rappel de la capacité
+                capa = row['Capacité en nombre de rolls']
+                c4.text(f"{capa} rolls")
+
+                if is_active:
+                    selected_vehicles.append({
+                        "type": type_v,
+                        "taux_max": taux / 100,
+                        "capa_rolls": capa,
+                        "ptac": row['PTAC (kg)']
+                    })
+
+            if st.button("Lancer la Simulation", type="primary"):
+                st.session_state['run_sim'] = True
+                st.session_state['final_fleet'] = selected_vehicles
+
+        ## --- ETAPE 4 : MOTEUR DE CALCUL (A VENIR) ---
+        if st.session_state.get('run_sim'):
+            st.info("🚀 Calcul de l'optimisation en cours... (Prochaine étape)")
+            # Ici nous intégrerons la logique de calcul complexe
