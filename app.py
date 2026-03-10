@@ -46,7 +46,7 @@ try:
 # Petite carte interactive
 
             st.map(data=[{"lat": coord1[0], "lon": coord1[1]}, {"lat": coord2[0], "lon": coord2[1]}])
-else:
+         else:
 
             st.error("Impossible de trouver l'une des adresses.")
 except Exception as e:
