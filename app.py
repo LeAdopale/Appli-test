@@ -3,51 +3,6 @@ import pandas as pd
 import plotly.express as px
 import datetime
 
-# --- 1. TOUTES LES FONCTIONS (LE MOTEUR) ---
-
-def extraire_flux_hebdo(df):
-    # ... (votre code actuel de nettoyage des flux) ...
-    return df_long
-
-def simuler_tournees(df_flux, flotte):
-    """
-    Logique d'optimisation : on sature les camions et on enchaîne 
-    les tours pour minimiser les chauffeurs.
-    """
-    resultats = []
-    # Tri par jour et par heure pour l'ordre de passage
-    # Note : Assurez-vous que la colonne 'Heure' est bien formatée
-    df_flux = df_flux.sort_values(by=['Jour']) 
-    
-    jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-    
-    for jour in jours:
-        flux_du_jour = df_flux[df_flux['Jour'] == jour].copy()
-        if flux_du_jour.empty: continue
-            
-        camions_actifs = [] # Représente nos chauffeurs/véhicules mobilisés
-        
-        for idx, flux in flux_du_jour.iterrows():
-            attribue = False
-            # On cherche un chauffeur déjà en route qui a fini sa livraison 
-            # et qui a encore de la place/du temps
-            for c in camions_actifs:
-                # Logique simplifiée : si le chauffeur est libre, il prend le flux
-                if c['libre_a'] <= datetime.time(8, 0): # Exemple : libre avant le prochain départ
-                    c['flux'].append(flux)
-                    attribue = True
-                    break
-            
-            if not attribue:
-                # On mobilise un nouveau chauffeur
-                camions_actifs.append({
-                    'id': len(camions_actifs) + 1,
-                    'flux': [flux],
-                    'libre_a': datetime.time(12, 0) # Heure de fin estimée
-                })
-        
-        resultats.append({'jour': jour, 'tournees': camions_actifs})
-    return resultats
     
 # Configuration de la page
 st.set_page_config(page_title="Logistique CHU Nantes", layout="wide")
@@ -214,7 +169,6 @@ if uploaded_file:
 
             st.divider()
 
-
             # 3. Bouton final
             if st.button("🚀 LANCER LE CALCUL DES TOURNÉES", type="primary", use_container_width=True):
                 if not selected_vehicles:
@@ -222,29 +176,4 @@ if uploaded_file:
                 else:
                     st.session_state['selected_fleet'] = selected_vehicles
                     st.session_state['step'] = 3
-                    st.rerun()
-
-            # --- ÉTAPE 4 : AFFICHAGE DES RÉSULTATS ---
-            if st.session_state.get('step') == 3:
-                st.header("📋 Planning d'Optimisation")
-                
-                df_final = st.session_state['df_flux_final']
-                flotte_choisie = st.session_state['selected_fleet']
-                
-                # Appel du moteur
-                planning = simuler_tournees(df_final, flotte_choisie)
-                
-                for jour_res in planning:
-                    with st.container():
-                        st.subheader(f"📅 {jour_res['jour']}")
-                        cols = st.columns(3)
-                        cols[0].metric("Chauffeurs requis", len(jour_res['tournees']))
-                        
-                        for t in jour_res['tournees']:
-                            with st.expander(f"Chauffeur {t['id']} - Planning détaillé"):
-                                for f in t['flux']:
-                                    st.write(f"📍 {f['Service']} : {f['Volume']} rolls")
-                
-                if st.button("🔄 Recommencer la simulation"):
-                    st.session_state['step'] = 2
                     st.rerun()
