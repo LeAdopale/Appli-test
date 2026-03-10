@@ -1,1 +1,14 @@
+class TourneeManager:
+    def __init__(self, flux, vehicules, distances):
+        self.flux = flux
+        self.vehicules = vehicules
+        self.distances = distances
+        
+    def solve_master_problem(self, columns):
+        # Utilise PuLP pour choisir les meilleures colonnes (tournées)
+        pass
 
+    def subproblem_pricing(self, dual_values):
+        # Utilise un algorithme de Labeling pour générer 
+        # la tournée la plus "rentable"
+        pass
