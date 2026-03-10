@@ -84,8 +84,17 @@ def calculer_matrice_hors_ligne(G, df_sites):
     
     nodes = []
     for _, row in df_gps.iterrows():
-        node = ox.nearest_nodes(G, X=row['Longitude'], Y=row['Latitude'])
-        nodes.append(node)
+        try:
+            # On force la conversion en float pour être certain
+            lon = float(row['Longitude'])
+            lat = float(row['Latitude'])
+            
+            # Appel à OSMnx (qui nécessite scipy en arrière-plan)
+            node = ox.nearest_nodes(G, X=lon, Y=lat)
+            nodes.append(node)
+        except Exception as e:
+            st.error(f"Erreur sur le site {row[0]} : {e}")
+            continue
         
     # 1. On projette chaque site (lat, lon) sur le noeud du graphe le plus proche
     for _, row in df_sites.iterrows():
