@@ -3,6 +3,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 import os
+import streamlit as st
 
 def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=20):
     """
