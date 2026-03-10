@@ -9,38 +9,40 @@ from geopy.extra.rate_limiter import RateLimiter
 import time
 
 def geocoder_sites(df_param_sites):
-    """
-    Transforme les adresses textuelles en coordonnées GPS.
-    df_param_sites doit avoir : Col A (Nom) et Col B (Adresse)
-    """
     geolocator = Nominatim(user_agent="chu_nantes_logistique")
-    # RateLimiter permet de ne pas surcharger le serveur (1 requête/sec max)
     geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
     
-    # Nettoyage des noms de colonnes
     df_param_sites.columns = [str(c).strip() for c in df_param_sites.columns]
     col_nom = df_param_sites.columns[0]
     col_adresse = df_param_sites.columns[1]
     
-    st.info("Géocodage des adresses en cours (1 sec par adresse)...")
-    
     lats, lons = [], []
-    for addr in df_param_sites[col_adresse]:
-        # On ajoute ", Nantes, France" si ce n'est pas précisé pour aider le moteur
+    adresses_en_echec = [] # <-- Liste pour capturer les erreurs
+
+    for _, row in df_param_sites.iterrows():
+        nom = row[col_nom]
+        addr = row[col_adresse]
         full_addr = addr if "nantes" in addr.lower() else f"{addr}, Nantes, France"
-        location = geocode(full_addr)
         
-        if location:
-            lats.append(location.latitude)
-            lons.append(location.longitude)
-        else:
-            st.warning(f"📍 Adresse non trouvée : {full_addr}")
+        try:
+            location = geocode(full_addr)
+            if location:
+                lats.append(location.latitude)
+                lons.append(location.longitude)
+            else:
+                lats.append(None)
+                lons.append(None)
+                adresses_en_echec.append({"Site": nom, "Adresse": addr, "Erreur": "Non trouvé"})
+        except Exception as e:
             lats.append(None)
             lons.append(None)
+            adresses_en_echec.append({"Site": nom, "Adresse": addr, "Erreur": str(e)})
             
     df_param_sites['Latitude'] = lats
     df_param_sites['Longitude'] = lons
-    return df_param_sites.dropna(subset=['Latitude', 'Longitude'])
+    
+    # On renvoie le DF complet ET la liste des erreurs
+    return df_param_sites, adresses_en_echec
 
 
 def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
