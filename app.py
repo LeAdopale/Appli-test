@@ -229,3 +229,32 @@ if uploaded_file:
                                 st.rerun()
                         else:
                             st.error("L'onglet 'param Sites' est introuvable dans le fichier Excel.")
+
+            # --- ÉTAPE 3 : RÉSULTATS DE L'ATOMISATION ET LANCEMENT OPTIMISATION ---
+            if st.session_state.get('step') == 3:
+                st.divider()
+                st.header("📦 Étape 3 : Catalogue des Tâches (Jobs)")
+                
+                df_jobs = st.session_state.get('df_jobs')
+                
+                if df_jobs is not None and not df_jobs.empty:
+                    st.success(f"✅ {len(df_jobs)} jobs générés avec succès sur la base des flux et de la capacité véhicule.")
+                    
+                    # Affichage d'un résumé rapide
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Total Jobs", len(df_jobs))
+                    c2.metric("Distance Totale (km)", f"{df_jobs['dist_km'].sum():.1f}")
+                    c3.metric("Temps de trajet cumulé", f"{int(df_jobs['temps_min'].sum())} min")
+                    
+                    # Aperçu du tableau des jobs
+                    with st.expander("Consulter le détail des jobs générés", expanded=True):
+                        st.dataframe(df_jobs, use_container_width=True)
+                        
+                    # --- BOUTON POUR LA PHASE 1 (OPTIMISATION) ---
+                    st.subheader("🤖 Optimisation des Tournées")
+                    if st.button("🔍 Calculer le planning optimal (Branch & Price)", type="primary"):
+                        with st.spinner("Le solveur PuLP recherche la meilleure combinaison de tournées..."):
+                            # C'est ici qu'on appellera la Phase 1 bientôt
+                            st.info("Appel du moteur d'optimisation (Phase 1) en préparation...")
+                else:
+                    st.error("Aucun job n'a pu être généré. Vérifiez la correspondance des noms de sites entre 'Flux' et 'param Sites'.")
