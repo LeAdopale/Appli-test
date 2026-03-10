@@ -184,6 +184,12 @@ if uploaded_file:
                 if not selected_vehicles:
                     st.error("Veuillez sélectionner au moins un véhicule.")
                 else:
+                    if st.session_state.get('geocoding_errors'):
+                        with st.expander("⚠️ Adresses introuvables détectées", expanded=True):
+                            st.error("Les sites suivants n'ont pas pu être localisés et seront exclus du calcul :")
+                            df_err = pd.DataFrame(st.session_state['geocoding_errors'])
+                            st.table(df_err)
+                            st.info("💡 Conseil : Vérifiez l'orthographe ou ajoutez le code postal dans votre fichier Excel.")
                     # 1. On sauvegarde d'abord la flotte dans la session
                     st.session_state['selected_fleet'] = selected_vehicles
                     
