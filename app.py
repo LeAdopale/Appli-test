@@ -167,18 +167,6 @@ if uploaded_file:
 
             st.divider()
 
-            # 2. Paramètres de Manutention
-            st.subheader("2. Temps de fonctionnement")
-            col_a, col_b = st.columns(2)
-            
-            with col_a:
-                # Récupération du temps de mise à quai par défaut depuis le premier véhicule actif
-                t_defaut = 15
-                st.session_state['t_fixe'] = st.number_input("Temps fixe mise à quai (min)", value=t_defaut)
-                
-            with col_b:
-                st.session_state['strat'] = st.selectbox("Stratégie de remplissage", 
-                                     ["Priorité Respect Horaires", "Priorité Optimisation KM", "Priorité Taux de remplissage"])
 
             # 3. Bouton final
             if st.button("🚀 LANCER LE CALCUL DES TOURNÉES", type="primary", use_container_width=True):
