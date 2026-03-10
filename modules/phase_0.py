@@ -21,19 +21,28 @@ def geocoder_sites(df_param_sites):
 
     for _, row in df_param_sites.iterrows():
         nom = row[col_nom]
-        addr = row[col_adresse]
-        # On force la localisation sur Nantes/France pour aider Nominatim
-        full_addr = f"{addr}, Nantes, France" if "nantes" not in str(addr).lower() else addr
+        addr = str(row[col_adresse]).strip()
+        
+        # On ajoute juste "France" si ce n'est pas déjà présent pour la précision
+        # On ne force plus "Nantes" car vos adresses sont complètes
+        full_addr = addr if "france" in addr.lower() else f"{addr}, France"
         
         try:
+            # On tente de trouver l'adresse
             location = geocode(full_addr)
             if location:
                 lats.append(location.latitude)
                 lons.append(location.longitude)
             else:
-                lats.append(None)
-                lons.append(None)
-                adresses_en_echec.append({"Site": nom, "Adresse": addr, "Erreur": "Non trouvé"})
+                # Si échec, on tente sans le "France" au cas où
+                location_bis = geocode(addr)
+                if location_bis:
+                    lats.append(location_bis.latitude)
+                    lons.append(location_bis.longitude)
+                else:
+                    lats.append(None)
+                    lons.append(None)
+                    adresses_en_echec.append({"Site": nom, "Adresse": addr, "Erreur": "Non trouvé"})
         except Exception as e:
             lats.append(None)
             lons.append(None)
@@ -44,13 +53,14 @@ def geocoder_sites(df_param_sites):
     return df_param_sites, adresses_en_echec
 
 def initialiser_graphe_routier(ville_ou_zone="Nantes, France"):
-    cache_path = "./data/graph_nantes.graphml"
+    cache_path = "./data/graph_nantes_large.graphml" # On change le nom du cache
     if os.path.exists(cache_path):
         return ox.load_graphml(cache_path)
     
     try:
-        # On télécharge Nantes Métropole pour être large
-        G = ox.graph_from_place(ville_ou_zone, network_type='drive')
+        # On télécharge avec un buffer de 25km autour du centre de Nantes
+        st.info("Téléchargement de la carte (zone étendue 40km)...")
+        G = ox.graph_from_address(ville_ou_zone, dist=40000, network_type='drive')
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
         if not os.path.exists("./data"): os.makedirs("./data")
