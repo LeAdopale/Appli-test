@@ -5,3 +5,4 @@ plotly
 osmnx
 networkx
 numpy
+geopy
