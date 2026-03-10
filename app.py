@@ -117,65 +117,74 @@ if uploaded_file:
             st.header("⚙️ Paramétrage de la Simulation")
             
             # 1. Sélection de la Flotte
-            st.subheader("1. Flotte de véhicules disponibles")
+            st.subheader("1. Flotte de véhicules et capacité de charge")
             onglet_v = next((s for s in all_data.keys() if "Véhicule" in s), None)
-            df_v = all_data[onglet_v]
+            df_v = all_data[onglet_v].copy()
+            
+            # Nettoyage du nom de la colonne Poids
+            col_poids = next((c for c in df_v.columns if "Poids max" in c or "PTAC" in c), None)
             
             selected_vehicles = []
             
-            # En-tête du tableau de bord flotte
-            cols_h = st.columns([1, 2, 2, 2, 2])
+            # Interface de sélection
+            cols_h = st.columns([0.5, 2, 1.5, 1.5, 2])
             cols_h[0].write("**Actif**")
-            cols_h[1].write("**Type**")
-            cols_h[2].write("**Remplissage Max**")
-            cols_h[3].write("**Capacité**")
-            cols_h[4].write("**Coût/km (CO2)**")
+            cols_h[1].write("**Type de véhicule**")
+            cols_h[2].write("**Charge Max (kg)**")
+            cols_h[3].write("**Marge sécu (%)**")
+            cols_h[4].write("**Impact Carbone**")
 
             for i, row in df_v.iterrows():
-                c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 2, 2])
+                c1, c2, c3, c4, c5 = st.columns([0.5, 2, 1.5, 1.5, 2])
+                
                 v_name = row['Types']
                 is_active = c1.checkbox("", value=True, key=f"v_active_{i}")
+                
+                # Extraction du poids (on enlève "T" ou "kg" pour avoir un nombre)
+                poids_str = str(row[col_poids]).lower().replace('t', '').replace('kg', '').replace(',', '.').strip()
+                try:
+                    poids_val = float(poids_str)
+                    if "t" in str(row[col_poids]).lower(): poids_val *= 1000 # Conversion tonnes -> kg
+                except:
+                    poids_val = 0
+
                 c2.write(f"**{v_name}**")
+                c3.write(f"{int(poids_val)} kg")
                 
-                # Taux de remplissage (pour garder une marge de sécurité)
-                taux = c3.slider("Marge %", 50, 100, 100, key=f"v_taux_{i}", label_visibility="collapsed")
+                # Taux de remplissage / Marge
+                taux = c4.number_input("Remplissage", 50, 100, 100, key=f"v_taux_{i}", label_visibility="collapsed")
                 
-                # Calcul de la capacité théorique (exemple sur les Rolls)
-                capa_r = row.get('Rolls PUI MG', 'Oui')
-                c4.write(f"✅ {row['PTAC']} max")
-                c5.write(f"{row['Cout carbone (kg/km)']} kg/km")
+                # Info Carbone
+                c5.write(f"🍃 {row.get('Cout carbone (kg/km)', 0)} kg/km")
 
                 if is_active:
                     selected_vehicles.append({
                         "id": v_name,
-                        "taux_remplissage": taux / 100,
-                        "ptac": row['PTAC'],
-                        "vitesse_moyenne": 30, # Par défaut 30km/h en ville
-                        "params_bruts": row.to_dict()
+                        "poids_max": poids_val * (taux / 100),
+                        "vitesse": 30, # Vitesse moyenne par défaut
+                        "data_origine": row.to_dict()
                     })
 
             st.divider()
 
-            # 2. Contraintes d'Exploitation
-            st.subheader("2. Contraintes d'exploitation")
+            # 2. Paramètres de Manutention
+            st.subheader("2. Temps de fonctionnement")
             col_a, col_b = st.columns(2)
             
             with col_a:
-                temps_chargement = st.number_input("Temps fixe par arrêt (minutes)", value=15, help="Temps moyen pour manœuvre et mise à quai")
-                respect_horaires = st.toggle("Respect strict des fenêtres horaires", value=True)
-            
+                # Récupération du temps de mise à quai par défaut depuis le premier véhicule actif
+                t_defaut = 15
+                st.session_state['t_fixe'] = st.number_input("Temps fixe mise à quai (min)", value=t_defaut)
+                
             with col_b:
-                pause_chauffeur = st.number_input("Pause obligatoire (minutes)", value=45, help="Appliquée si la vacation dépasse 4h30")
-                priorite = st.selectbox("Priorité de l'algorithme", 
-                                     ["Optimiser le nombre de camions", "Minimiser les kilomètres parcourus", "Respecter les horaires à 100%"])
+                st.session_state['strat'] = st.selectbox("Stratégie de remplissage", 
+                                     ["Priorité Respect Horaires", "Priorité Optimisation KM", "Priorité Taux de remplissage"])
 
-            # 3. Lancement
-            if st.button("🚀 GÉNÉRER LES TOURNÉES", type="primary", use_container_width=True):
-                st.session_state['selected_fleet'] = selected_vehicles
-                st.session_state['sim_params'] = {
-                    "temps_fixe": temps_chargement,
-                    "respect_horaires": respect_horaires,
-                    "pause": pause_chauffeur
-                }
-                st.session_state['step'] = 3 # Passage au calcul
-                st.rerun()
+            # 3. Bouton final
+            if st.button("🚀 LANCER LE CALCUL DES TOURNÉES", type="primary", use_container_width=True):
+                if not selected_vehicles:
+                    st.error("Veuillez sélectionner au moins un véhicule.")
+                else:
+                    st.session_state['selected_fleet'] = selected_vehicles
+                    st.session_state['step'] = 3
+                    st.rerun()
