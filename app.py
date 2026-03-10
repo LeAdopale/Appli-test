@@ -30,20 +30,49 @@ if uploaded_file:
         # Attribution des DataFrames
         df_v = data["param Véhicules"]
         df_f = data["M flux"]
-
+        
         ## --- ETAPE 2 : CONTROLE DE COHERENCE ---
         st.header("📊 1. Contrôle des flux hebdomadaires")
         
-        # On regroupe par Fonction Support et Jour pour l'histogramme
-        # On suppose les colonnes 'Fonction support', 'Jour de passage' et 'Nombre de contenants'
-        if 'Fonction support' in df_f.columns:
-            fig = px.histogram(df_f, x="Jour de passage", y="Nombre de contenants", 
-                               color="Fonction support", barmode="group",
-                               title="Volume de contenants à distribuer par jour")
-            st.plotly_chart(fig, use_container_width=True)
+        # 1. Identification automatique de la colonne temporelle
+        col_jour = None
+        for candidat in ['Jour de passage', 'Jour', 'date', 'Journée']:
+            if candidat in df_f.columns:
+                col_jour = candidat
+                break
         
-        if st.button("Valider les données d'entrée"):
+        if col_jour:
+            # 2. Préparation des données pour le graphique
+            # On groupe par Jour et par Fonction Support pour voir la répartition
+            df_grouped = df_f.groupby([col_jour, 'Fonction support'])['Nombre de contenants'].sum().reset_index()
+            
+            # Tri des jours pour un affichage chronologique (Lundi -> Dimanche)
+            ordre_jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+            df_grouped[col_jour] = pd.Categorical(df_grouped[col_jour], categories=ordre_jours, ordered=True)
+            df_grouped = df_grouped.sort_values(col_jour)
+        
+            # 3. Affichage du graphique immédiat
+            fig = px.bar(
+                df_grouped, 
+                x=col_jour, 
+                y="Nombre de contenants", 
+                color="Fonction support",
+                title="Volume total de contenants par jour et par service",
+                barmode="group",
+                text_auto='.2s'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.info("💡 Vérifiez que les volumes ci-dessus correspondent à vos attentes avant de valider.")
+        else:
+            st.warning("⚠️ Impossible de trouver une colonne 'Jour de passage' dans l'onglet M flux.")
+            st.write("Colonnes détectées :", list(df_f.columns))
+        
+        # Le bouton de validation vient APRES le graphique
+        if st.button("Valider ces données et configurer la flotte"):
             st.session_state['validated'] = True
+            st.rerun() # Force le rafraîchissement pour afficher l'étape suivante
 
         ## --- ETAPE 3 : CONFIGURATION DE LA FLOTTE ---
         if st.session_state.get('validated'):
