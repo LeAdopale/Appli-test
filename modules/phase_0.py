@@ -5,25 +5,32 @@ import numpy as np
 import os
 import streamlit as st
 
-def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=20):
-    """
-    Télécharge et prépare le graphe routier localement.
-    Utilise un cache pour éviter de retélécharger à chaque fois.
-    """
+def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
     cache_path = "./data/graph_nantes.graphml"
     
     if os.path.exists(cache_path):
-        # Chargement du graphe sauvegardé
         G = ox.load_graphml(cache_path)
     else:
-        # Téléchargement initial (profil 'drive' pour les camions/voitures)
-        st.info(f"Téléchargement du graphe pour {ville_ou_zone}...")
-        G = ox.graph_from_place(ville_ou_zone, network_type='drive', buffer_dist=buffer_km*1000)
-        # On ajoute les vitesses et temps de trajet par défaut sur les arcs
+        st.info(f"Téléchargement initial du graphe pour {ville_ou_zone}...")
+        
+        # Correction ici : on utilise graph_from_place sans le buffer_dist problématique
+        # ou on utilise graph_from_address avec une distance explicite.
+        try:
+            # Approche la plus stable :
+            G = ox.graph_from_place(ville_ou_zone, network_type='drive')
+            
+            # Si vous avez vraiment besoin d'un buffer plus large que les limites de la ville :
+            # G = ox.graph_from_address(ville_ou_zone, dist=buffer_km*1000, network_type='drive')
+            
+        except Exception as e:
+            st.error(f"Erreur lors du téléchargement OSM : {e}")
+            return None
+
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
-        # Sauvegarde locale
-        if not os.path.exists("./data"): os.makedirs("./data")
+        
+        if not os.path.exists("./data"): 
+            os.makedirs("./data")
         ox.save_graphml(G, cache_path)
         
     return G
