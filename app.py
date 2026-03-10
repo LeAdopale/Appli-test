@@ -2,7 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import datetime
+import os
 
+if not os.path.exists("./data"):
+    os.makedirs("./data")
+
+from modules.phase_0 import initialiser_graphe_routier, calculer_matrice_hors_ligne, generer_jobs_atomises
+
+@st.cache_resource
+def get_cached_graph(ville="Nantes, France"):
+    """Télécharge le graphe une seule fois et le stocke en RAM"""
+    return initialiser_graphe_routier(ville)
     
 # Configuration de la page
 st.set_page_config(page_title="Logistique CHU Nantes", layout="wide")
@@ -177,3 +187,24 @@ if uploaded_file:
                     st.session_state['selected_fleet'] = selected_vehicles
                     st.session_state['step'] = 3
                     st.rerun()
+
+                with st.status("Initialisation du moteur de calcul...") as status:
+                    # A. Chargement du graphe
+                    status.update(label="Chargement de la carte routière (OSM)...")
+                    G = get_cached_graph("Nantes, France")
+                    
+                    # B. Calcul des matrices (Uniquement entre les sites présents dans l'Excel)
+                    status.update(label="Calcul de la matrice de distances réelles...")
+                    df_sites = st.session_state['all_data']['Sites'] # On suppose l'onglet 'Sites'
+                    mat_dist, mat_temps = calculer_matrice_hors_ligne(G, df_sites)
+                    
+                    # C. Atomisation des flux en 'Jobs'
+                    status.update(label="Génération du catalogue de tâches (Jobs)...")
+                    capa_max = 18 # Ou récupéré dynamiquement de la flotte
+                    df_jobs = generer_jobs_atomises(
+                        st.session_state['df_flux_final'], 
+                        df_sites, 
+                        mat_dist, 
+                        mat_temps, 
+                        capa_max
+                    )
