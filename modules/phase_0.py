@@ -80,7 +80,7 @@ def calculer_matrice_hors_ligne(G, df_sites):
     """
 
     # Étape de géocodage
-    df_gps = geocoder_sites(df_param_sites)
+    df_gps = geocoder_sites(df_sites)
     
     nodes = []
     for _, row in df_gps.iterrows():
