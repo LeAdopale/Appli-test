@@ -6,23 +6,24 @@ import os
 import streamlit as st
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
-import time
 
 def geocoder_sites(df_param_sites):
     geolocator = Nominatim(user_agent="chu_nantes_logistique")
     geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
     
+    # Nettoyage des colonnes
     df_param_sites.columns = [str(c).strip() for c in df_param_sites.columns]
     col_nom = df_param_sites.columns[0]
     col_adresse = df_param_sites.columns[1]
     
     lats, lons = [], []
-    adresses_en_echec = [] # <-- Liste pour capturer les erreurs
+    adresses_en_echec = []
 
     for _, row in df_param_sites.iterrows():
         nom = row[col_nom]
         addr = row[col_adresse]
-        full_addr = addr if "nantes" in addr.lower() else f"{addr}, Nantes, France"
+        # On force la localisation sur Nantes/France pour aider Nominatim
+        full_addr = f"{addr}, Nantes, France" if "nantes" not in str(addr).lower() else addr
         
         try:
             location = geocode(full_addr)
@@ -40,139 +41,102 @@ def geocoder_sites(df_param_sites):
             
     df_param_sites['Latitude'] = lats
     df_param_sites['Longitude'] = lons
-    
-    # On renvoie le DF complet ET la liste des erreurs
     return df_param_sites, adresses_en_echec
 
-def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
+def initialiser_graphe_routier(ville_ou_zone="Nantes, France"):
     cache_path = "./data/graph_nantes.graphml"
-    
     if os.path.exists(cache_path):
-        G = ox.load_graphml(cache_path)
-    else:
-        st.info(f"Téléchargement initial du graphe pour {ville_ou_zone}...")
-        
-        # Correction ici : on utilise graph_from_place sans le buffer_dist problématique
-        # ou on utilise graph_from_address avec une distance explicite.
-        try:
-            # Approche la plus stable :
-            G = ox.graph_from_place(ville_ou_zone, network_type='drive')
-            
-            # Si vous avez vraiment besoin d'un buffer plus large que les limites de la ville :
-            # G = ox.graph_from_address(ville_ou_zone, dist=buffer_km*1000, network_type='drive')
-            
-        except Exception as e:
-            st.error(f"Erreur lors du téléchargement OSM : {e}")
-            return None
-
+        return ox.load_graphml(cache_path)
+    
+    try:
+        # On télécharge Nantes Métropole pour être large
+        G = ox.graph_from_place(ville_ou_zone, network_type='drive')
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
-        
-        if not os.path.exists("./data"): 
-            os.makedirs("./data")
+        if not os.path.exists("./data"): os.makedirs("./data")
         ox.save_graphml(G, cache_path)
-        
-    return G
-
-
+        return G
+    except Exception as e:
+        st.error(f"Erreur OSM : {e}")
+        return None
 
 def calculer_matrice_hors_ligne(G, df_param_sites):
-    # Récupération du DF et des erreurs
+    # 1. Géocodage
     df_gps, erreurs = geocoder_sites(df_param_sites)
-    
-    # On stocke les erreurs dans la session Streamlit pour les afficher plus tard
     if erreurs:
         st.session_state['geocoding_errors'] = erreurs
     
-    # On ne garde que les valides pour la suite
-    df_valides = df_gps.dropna(subset=['Latitude', 'Longitude'])
- 
+    # 2. Filtrage des sites valides (ceux qui ont des coordonnées)
+    df_valides = df_gps.dropna(subset=['Latitude', 'Longitude']).copy()
     
     if df_valides.empty:
-        st.error("❌ Aucun site n'a pu être localisé sur la carte. Vérifiez le format des adresses.")
-        return None, None
+        st.error("❌ Aucun site n'a pu être localisé.")
+        return None, None, None
 
+    # 3. Projection sur le graphe et création d'un mapping ID_SITE -> INDEX_MATRICE
     nodes = []
-    for idx, row in df_valides.iterrows():
+    mapping_site_index = {} # Pour faire le lien propre avec les flux
+    nom_col_site = df_valides.columns[0]
+
+    for idx, (idx_df, row) in enumerate(df_valides.iterrows()):
         try:
-            # Conversion explicite et vérification
-            lon = float(row['Longitude'])
-            lat = float(row['Latitude'])
-            
-            # Projection sur le graphe
-            node = ox.nearest_nodes(G, X=lon, Y=lat)
+            node = ox.nearest_nodes(G, X=float(row['Longitude']), Y=float(row['Latitude']))
             nodes.append(node)
-        except Exception as e:
-            st.warning(f"⚠️ Impossible de projeter le site {idx} sur la route : {e}")
+            # On lie le nom du site (ex: 'Hôtel Dieu') à sa position dans la future matrice (ex: 0)
+            mapping_site_index[str(row[nom_col_site]).strip()] = idx
+        except:
             continue
-            
-    # 3. Calcul de la matrice entre les noeuds valides
-    num_nodes = len(nodes)
-    mat_dist = np.zeros((num_nodes, num_nodes))
-    mat_temps = np.zeros((num_nodes, num_nodes))
+
+    # 4. Calcul de la matrice
+    num_n = len(nodes)
+    mat_dist = np.zeros((num_n, num_n))
+    mat_temps = np.zeros((num_n, num_n))
     
-    for i in range(num_nodes):
-        for j in range(num_nodes):
+    for i in range(num_n):
+        for j in range(num_n):
             if i == j: continue
             try:
-                # Calcul Dijkstra
                 mat_temps[i, j] = nx.shortest_path_length(G, nodes[i], nodes[j], weight='travel_time') / 60
                 mat_dist[i, j] = nx.shortest_path_length(G, nodes[i], nodes[j], weight='length') / 1000
-            except nx.NetworkXNoPath:
-                mat_temps[i, j] = 999
-                mat_dist[i, j] = 999
+            except:
+                mat_temps[i, j], mat_dist[i, j] = 999, 999
 
-    return mat_dist, mat_temps
+    # On renvoie le mapping pour que generer_jobs puisse s'y retrouver
+    return mat_dist, mat_temps, mapping_site_index
 
-def generer_jobs_atomises(df_flux, df_sites, matrice_dist, matrice_temps, capa_vehicule_max):
-    """
-    Transforme les flux en 'Jobs' individuels.
-    Utilise l'ordre des colonnes pour éviter les KeyError sur les noms.
-    """
-    # 1. On nettoie les espaces dans les noms de colonnes de df_sites
-    df_sites.columns = [str(c).strip() for c in df_sites.columns]
-    
-    # On suppose que la colonne 0 est le NOM du site (ex: 'Hôtel Dieu')
-    nom_col_site = df_sites.columns[0]
-    
-    # Création du dictionnaire de correspondance : { 'Hôtel Dieu': 0, 'Laënnec': 1, ... }
-    site_to_idx = {name: i for i, name in enumerate(df_sites[nom_col_site])}
-    
-    # Identification des colonnes dans df_flux (Aller/Retour, Départ, Arrivée, Volume)
-    # On cherche les colonnes par mots-clés pour être robuste
+def generer_jobs_atomises(df_flux, mapping_site_index, matrice_dist, matrice_temps, capa_max):
     col_dep = next((c for c in df_flux.columns if "départ" in str(c).lower()), df_flux.columns[0])
     col_arr = next((c for c in df_flux.columns if "destination" in str(c).lower()), df_flux.columns[1])
     col_vol = next((c for c in df_flux.columns if "volume" in str(c).lower()), "Volume")
 
     jobs = []
     for idx, flux in df_flux.iterrows():
-        # Calcul du nombre de "morceaux" de flux (split)
-        volume_total = float(flux[col_vol])
-        if volume_total <= 0: continue
-            
-        nb_splits = int(np.ceil(volume_total / capa_vehicule_max))
-        
-        # Récupération des indices dans la matrice
         try:
-            i = site_to_idx[str(flux[col_dep]).strip()]
-            j = site_to_idx[str(flux[col_arr]).strip()]
-        except KeyError as e:
-            st.warning(f"⚠️ Le site '{e}' présent dans les flux est inconnu dans l'onglet 'param Sites'.")
-            continue
-        
-        for s in range(nb_splits):
-            vol_unitaire = capa_vehicule_max if s < nb_splits - 1 else (volume_total % capa_vehicule_max or capa_vehicule_max)
+            orig_name = str(flux[col_dep]).strip()
+            dest_name = str(flux[col_arr]).strip()
             
-            jobs.append({
-                'id_job': f"J_{idx}_{s}",
-                'origine': flux[col_dep],
-                'destination': flux[col_arr],
-                'volume': vol_unitaire,
-                'dist_km': matrice_dist[i, j],
-                'temps_min': matrice_temps[i, j],
-                # On garde les fenêtres horaires si elles existent, sinon valeurs par défaut
-                'h_dep': flux.get('Heure de mise à disposition min départ', "08:00"),
-                'h_arr': flux.get('Heure de livraison à destination', "18:00")
-            })
+            # On utilise le mapping issu de calculer_matrice_hors_ligne
+            i = mapping_site_index[orig_name]
+            j = mapping_site_index[dest_name]
+            
+            vol_tot = float(flux[col_vol])
+            if vol_tot <= 0: continue
+            
+            nb_splits = int(np.ceil(vol_tot / capa_max))
+            for s in range(nb_splits):
+                v_unit = capa_max if s < nb_splits - 1 else (vol_tot % capa_max or capa_max)
+                jobs.append({
+                    'id_job': f"J_{idx}_{s}",
+                    'origine': orig_name,
+                    'destination': dest_name,
+                    'volume': v_unit,
+                    'dist_km': matrice_dist[i, j],
+                    'temps_min': matrice_temps[i, j],
+                    'h_dep': flux.get('Heure de mise à disposition min départ', "08:00"),
+                    'h_arr': flux.get('Heure de livraison à destination', "18:00")
+                })
+        except KeyError:
+            # Le site n'est pas dans le mapping (soit absent de l'Excel, soit échec géocodage)
+            continue
             
     return pd.DataFrame(jobs)
