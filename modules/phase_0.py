@@ -44,7 +44,6 @@ def geocoder_sites(df_param_sites):
     # On renvoie le DF complet ET la liste des erreurs
     return df_param_sites, adresses_en_echec
 
-
 def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
     cache_path = "./data/graph_nantes.graphml"
     
@@ -75,19 +74,26 @@ def initialiser_graphe_routier(ville_ou_zone="Nantes, France", buffer_km=40):
         
     return G
 
+
+
 def calculer_matrice_hors_ligne(G, df_param_sites):
-    # 1. Géocodage
-    df_gps = geocoder_sites(df_param_sites)
+    # Récupération du DF et des erreurs
+    df_gps, erreurs = geocoder_sites(df_param_sites)
     
-    # 2. Sécurité : On ne garde QUE les lignes où Lat/Lon ne sont pas nulles
-    df_gps = df_gps.dropna(subset=['Latitude', 'Longitude'])
+    # On stocke les erreurs dans la session Streamlit pour les afficher plus tard
+    if erreurs:
+        st.session_state['geocoding_errors'] = erreurs
     
-    if df_gps.empty:
+    # On ne garde que les valides pour la suite
+    df_valides = df_gps.dropna(subset=['Latitude', 'Longitude'])
+ 
+    
+    if df_valides.empty:
         st.error("❌ Aucun site n'a pu être localisé sur la carte. Vérifiez le format des adresses.")
         return None, None
 
     nodes = []
-    for idx, row in df_gps.iterrows():
+    for idx, row in df_valides.iterrows():
         try:
             # Conversion explicite et vérification
             lon = float(row['Longitude'])
