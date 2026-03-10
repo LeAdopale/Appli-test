@@ -111,47 +111,71 @@ if uploaded_file:
         if st.session_state.get('step') == 2:
             st.success("Volumes validés. Paramétrez votre flotte.")
 
-        ## --- ETAPE 3 : CONFIGURATION DE LA FLOTTE ---
-        if st.session_state.get('validated'):
+        # --- ÉTAPE 3 : CONFIGURATION DE LA SIMULATION ---
+        if st.session_state.get('step') == 2:
             st.divider()
-            st.header("⚙️ 2. Configuration de la simulation")
-            st.subheader("Sélectionnez les véhicules disponibles et leur taux de remplissage")
-
+            st.header("⚙️ Paramétrage de la Simulation")
+            
+            # 1. Sélection de la Flotte
+            st.subheader("1. Flotte de véhicules disponibles")
+            onglet_v = next((s for s in all_data.keys() if "Véhicule" in s), None)
+            df_v = all_data[onglet_v]
+            
             selected_vehicles = []
             
-            # Création du tableau de sélection
-            cols = st.columns([1, 2, 2, 2])
-            cols[0].write("**Actif**")
-            cols[1].write("**Type de véhicule**")
-            cols[2].write("**Taux d'occupation max (%)**")
-            cols[3].write("**Capacité (Rolls)**")
+            # En-tête du tableau de bord flotte
+            cols_h = st.columns([1, 2, 2, 2, 2])
+            cols_h[0].write("**Actif**")
+            cols_h[1].write("**Type**")
+            cols_h[2].write("**Remplissage Max**")
+            cols_h[3].write("**Capacité**")
+            cols_h[4].write("**Coût/km (CO2)**")
 
             for i, row in df_v.iterrows():
-                c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
-                is_active = c1.checkbox("", value=True, key=f"check_{i}")
-                type_v = row['Type de véhicule']
-                c2.text(type_v)
+                c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 2, 2])
+                v_name = row['Types']
+                is_active = c1.checkbox("", value=True, key=f"v_active_{i}")
+                c2.write(f"**{v_name}**")
                 
-                # Input pour le taux d'occupation (par défaut 100%)
-                taux = c3.number_input("", min_value=10, max_value=100, value=100, step=5, key=f"taux_{i}")
+                # Taux de remplissage (pour garder une marge de sécurité)
+                taux = c3.slider("Marge %", 50, 100, 100, key=f"v_taux_{i}", label_visibility="collapsed")
                 
-                # Rappel de la capacité
-                capa = row['Capacité en nombre de rolls']
-                c4.text(f"{capa} rolls")
+                # Calcul de la capacité théorique (exemple sur les Rolls)
+                capa_r = row.get('Rolls PUI MG', 'Oui')
+                c4.write(f"✅ {row['PTAC']} max")
+                c5.write(f"{row['Cout carbone (kg/km)']} kg/km")
 
                 if is_active:
                     selected_vehicles.append({
-                        "type": type_v,
-                        "taux_max": taux / 100,
-                        "capa_rolls": capa,
-                        "ptac": row['PTAC (kg)']
+                        "id": v_name,
+                        "taux_remplissage": taux / 100,
+                        "ptac": row['PTAC'],
+                        "vitesse_moyenne": 30, # Par défaut 30km/h en ville
+                        "params_bruts": row.to_dict()
                     })
 
-            if st.button("Lancer la Simulation", type="primary"):
-                st.session_state['run_sim'] = True
-                st.session_state['final_fleet'] = selected_vehicles
+            st.divider()
 
-        ## --- ETAPE 4 : MOTEUR DE CALCUL (A VENIR) ---
-        if st.session_state.get('run_sim'):
-            st.info("🚀 Calcul de l'optimisation en cours... (Prochaine étape)")
-            # Ici nous intégrerons la logique de calcul complexe
+            # 2. Contraintes d'Exploitation
+            st.subheader("2. Contraintes d'exploitation")
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                temps_chargement = st.number_input("Temps fixe par arrêt (minutes)", value=15, help="Temps moyen pour manœuvre et mise à quai")
+                respect_horaires = st.toggle("Respect strict des fenêtres horaires", value=True)
+            
+            with col_b:
+                pause_chauffeur = st.number_input("Pause obligatoire (minutes)", value=45, help="Appliquée si la vacation dépasse 4h30")
+                priorite = st.selectbox("Priorité de l'algorithme", 
+                                     ["Optimiser le nombre de camions", "Minimiser les kilomètres parcourus", "Respecter les horaires à 100%"])
+
+            # 3. Lancement
+            if st.button("🚀 GÉNÉRER LES TOURNÉES", type="primary", use_container_width=True):
+                st.session_state['selected_fleet'] = selected_vehicles
+                st.session_state['sim_params'] = {
+                    "temps_fixe": temps_chargement,
+                    "respect_horaires": respect_horaires,
+                    "pause": pause_chauffeur
+                }
+                st.session_state['step'] = 3 # Passage au calcul
+                st.rerun()
